@@ -2,15 +2,23 @@ use std::net::{ TcpStream, TcpListener };
 use std::io::prelude::*;
 use native_dialog::{ FileDialog };
 
-mod response; use response::{ get_content };
+mod response; 
+mod resources;
+
+use crate::watcher::Watcher;
+use resources::FileLoader;
+
+const DEFAULT_HOST: &str = "0.0.0.0";
 
 pub struct ServerParams {
 	pub port: String
 }
 
 pub struct Server {
-	root: String,
-	listener: TcpListener,
+	root			: String,
+	tcp				: TcpListener,
+	watcher		: Option<Watcher>,
+	resources	: Option<FileLoader>,
 }
 
 impl Server {
@@ -18,24 +26,42 @@ impl Server {
 	pub fn new(params: ServerParams) -> Server {
 
 		Server {
-			root: String::from(""),
-			listener: TcpListener::bind(format!("0.0.0.0:{}", params.port)).unwrap()
+			root			: String::from(""),
+			tcp				: TcpListener::bind(format!("{}:{}", DEFAULT_HOST, params.port)).unwrap(),
+			watcher		: None,
+			resources : None,
 		}
 
 	}
 
 	pub fn init(&mut self) {
 
-		self.root = self.get_root();
+		self.root 			= self.get_root();
+		self.watcher 		= Some(Watcher::new(self.root.clone()));
+		self.resources 	= Some(FileLoader::new());
 
-		println!(":: Await new connection at {} ::", self.listener.local_addr().unwrap());
+		println!("\n:: Collect resources ::");
 
-		for stream in self.listener.incoming() {
+		if let Some(res) = self.resources.as_mut() {
+			res.collect(&self.root).unwrap();
+		}
+
+		// println!("{:#?}", self.resources);
+
+		println!("\n:: Init fs watcher ::");
+
+		if let Some(instance) = self.watcher.as_mut() {
+			instance.init()
+		}
+
+		println!("\n:: Await new connection at {} ::", self.tcp.local_addr().unwrap());
+
+		for stream in self.tcp.incoming() {
 			match stream {
-				Ok(stream) 
-					=> self.connection_handler(stream),
-				Err(err) 
-					=> println!("{}",err)
+				Ok(stream) => {
+					self.connection_handler(stream)
+				},
+				Err(e) => println!("{}", e),
 			}
 		}
 
@@ -56,6 +82,8 @@ impl Server {
 	}
 
 	fn connection_handler(&self, mut stream: TcpStream) {
+
+		use response::{ get_content };
 
 		let mut buffer: [u8; 1024] = [0; 1024];
 
@@ -83,7 +111,7 @@ impl Server {
 			}
 		};
 
-    stream.write(get_content(&self, resourse_path).as_bytes()).unwrap();
+    stream.write(&get_content(self, resourse_path)).unwrap();
 		stream.flush().unwrap();
 
 	}
