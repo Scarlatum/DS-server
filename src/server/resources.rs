@@ -3,23 +3,23 @@ use std::io::Result;
 use std::fs;
 
 pub struct FileLoader {
-  resources: HashMap<String, Vec<u8>>
+  pub files: HashMap<String, Vec<u8>>
 }
 
 impl FileLoader {
 
   pub fn new() -> FileLoader {
     FileLoader {
-      resources: HashMap::new(),
+      files: HashMap::new(),
     }
   }
 
   pub fn get(&self, path: &String) -> Option<&Vec<u8>> {
-    return self.resources.get(path);
+    return self.files.get(path);
   }
 
   pub fn set(&mut self, path: &String, data: Vec<u8>) {
-    self.resources.insert(path.clone(), data);
+    self.files.insert(path.clone(), data);
   }
 
   pub fn collect(&mut self, root: &String) -> Result<()> {

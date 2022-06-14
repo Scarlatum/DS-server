@@ -7,10 +7,10 @@ pub fn get_content(server: &Server, path: String) -> Vec<u8> {
   let ext = parts.last().unwrap();
   let path = format!("{}{}", server.root, path.replace("/", "\\"));
 
-  let body  = get_file(&server, path);
+  let body  = get_file(&server, &path);
   let content_type = define_extension(ext);
 
-  println!(":: Request data :: type: {} | length: {}", content_type, body.len());
+  println!(":: Request data :: type: {} | length: {} | path: {}", content_type, body.len(), path);
 
   let mut response = format!(
     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\n\r\n",
@@ -35,17 +35,17 @@ fn define_extension(name: &str) -> String {
     "webp" | "png" | "jpg" | "avif"
       => format!("image/{}", name),
     _ 
-      => String::from("text/html")
+      => String::from("text/html; charset=utf-8")
   }
 }
 
-fn get_file(server: &Server, path: String) -> Vec<u8> {
+fn get_file(server: &Server, path: &String) -> Vec<u8> {
 
   let buffer: Vec<u8> = Vec::new();
 
   match &server.resources {
     Some(loader) => {
-      match loader.get(&path) {
+      match loader.get(path) {
         Some(file) => file.clone(),
         None => buffer
       }
