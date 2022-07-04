@@ -3,14 +3,15 @@ use std::io::Result;
 use std::fs;
 
 pub struct FileLoader {
-  pub files: HashMap<String, Vec<u8>>
+  pub files: HashMap<String, Vec<u8>>,
+  
 }
 
 impl FileLoader {
 
   pub fn new() -> FileLoader {
     FileLoader {
-      files: HashMap::new(),
+      files   : HashMap::new(),
     }
   }
 

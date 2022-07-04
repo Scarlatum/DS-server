@@ -1,14 +1,31 @@
+// STD
 use std::net::{ TcpStream, TcpListener };
+use std::thread;
+use std::time;
 use std::io::prelude::*;
+use std::sync::mpsc::{ Receiver, Sender, channel };
 
-use native_dialog::{ FileDialog };
+// Vendor
+use native_dialog::FileDialog;
 
+// Watcher module
+use crate::watcher::{ Watcher };
+use crate::utils;
+
+// todo Connection module •
+// mod connection;
+// use connection::Connection;
+
+// Response module
 mod response; 
-mod resources;
-mod pages;
+use response::get_content;
 
-use crate::watcher::Watcher;
+// Resources
+mod resources;
 use resources::FileLoader;
+
+// Page module
+mod pages;
 use pages::PagesDict;
 
 const DEFAULT_HOST: &str = "0.0.0.0";
@@ -17,24 +34,16 @@ pub struct ServerParams {
 	pub port: String
 }
 
-#[derive(Debug)]
-enum Dist {
-	Relative,
-	Absolute,
-}
-
 struct Redirect {
 	path: String,
-	dist: Dist,
 }
 
 pub struct Server {
 	root					: String,
 	tcp						: TcpListener,
-	watcher				: Option<Watcher>,
-	resources			: Option<FileLoader>,
 	redirect			: Redirect,
 	pages					: PagesDict,
+	resources			: Option<FileLoader>,
 }
 
 impl Server {
@@ -42,15 +51,13 @@ impl Server {
 	pub fn new(params: ServerParams) -> Server {
 
 		Server {
-			root			: String::default(),
-			tcp				: TcpListener::bind(format!("{}:{}", DEFAULT_HOST, params.port)).unwrap(),
-			watcher		: None,
-			resources : None,
-			pages			: PagesDict::new(),
-			redirect  : Redirect { 
-				path: String::default(), 
-				dist: Dist::Absolute 
-			}
+			root				: String::default(),
+
+			tcp					: TcpListener::bind(format!("{}:{}", DEFAULT_HOST, params.port)).unwrap(),
+			redirect 		: Redirect { path: String::default() },
+
+			pages				: PagesDict::new(),
+			resources 	: None,
 		}
 
 	}
@@ -58,7 +65,6 @@ impl Server {
 	pub fn init(&mut self) -> () {
 
 		self.root 			= self.get_root().unwrap();
-		self.watcher 		= Some(Watcher::new(self.root.clone()));
 		self.resources 	= Some(FileLoader::new());
 
 		println!("\n:: Collect resources ::");
@@ -68,34 +74,91 @@ impl Server {
 		}
 
 		println!("\n:: Set pages ::");
+		self.set_pages();
 
+		// let ( app_tx, app_rx ) = channel();
+		// let ( watcher_tx, watcher_rx ) = channel();
+
+		// println!("\n:: Init fs watcher ::");
+		// self.watcher_task(self.root.clone(), app_rx, watcher_tx);
+
+		println!("\n:: Await new connection at {} ::", self.tcp.local_addr().unwrap());
+		self.application_loop();
+
+	}
+
+	// !todo rewrite whole method as non-blocking.
+	fn application_loop(&mut self) {
+		
+		// ! Так как TCP.accept() блокирует поток, то получить что-то из соседнего потока нет никакой-то возможности.
+		// ! Но из-за `self.tcp.set_nonblocking(true)` нужно решать проблемы сокетов...
+		// self.tcp.set_nonblocking(true)
+
+		loop {
+			
+			// match rx.recv() {
+			// 	Ok(status) => {
+			// 		if status { 
+			// 			if let Some(res) = self.resources.as_mut() {
+			// 				println!(":: Update files ::");
+			// 				res.collect(&self.root).unwrap();
+			// 			}
+			// 		};
+			// 	},
+			// 	Err(err) => println!("{}", err),
+			// }
+
+			match self.tcp.accept() {
+				Ok(( stream, _ )) => {
+					self.handler(stream);
+				},
+				Err(_) => (),
+			}
+
+		}
+	}
+
+	fn watcher_task(&mut self, root: String, tx: Sender<bool>) {
+
+		thread::spawn(move || {
+
+			let mut watcher = Watcher::new(root); watcher.init();
+
+			loop {
+
+				thread::sleep(time::Duration::from_secs(1));
+
+				if watcher.check_files() {
+					tx.send(true).unwrap(); watcher.updated = Vec::new();
+				} else {
+					tx.send(false).unwrap();
+				};
+
+			}
+
+		});
+
+	}
+
+	fn set_pages(&mut self) {
 		if let Some(container) = &self.resources {
 			for (path, _buffer) in &container.files {
 				if path.contains(".html") {
-					self.pages.set(path.clone())
+
+					let mut catalog = path
+						.replace(&self.root, "")
+						.replace("\\", "/")
+						.replace("/index.html", "");
+
+					if catalog.is_empty() {
+						catalog += "/"
+					}
+
+					self.pages.set(catalog);
+
 				}
 			}
 		}
-
-		println!("\n:: Init fs watcher ::");
-
-		if let Some(instance) = self.watcher.as_mut() {
-			instance.init()
-		}
-
-		println!("\n:: Await new connection at {} ::", self.tcp.local_addr().unwrap());
-
-		loop {
-			match self.tcp.accept() {
-				Ok(( stream, _addr )) => {
-					self.handler(stream);
-				}, 
-				Err(error) => {
-					println!("{}", error)
-				}
-			}
-		}
-
 	}
 
 	fn get_root(&mut self) -> Option<String> {
@@ -114,15 +177,12 @@ impl Server {
 
 	fn handler(&mut self, mut stream: TcpStream) {
 
-		use response::get_content;
-
-		let mut buffer: [u8; 1024] = [0; 1024];
-
-		stream.read(&mut buffer).unwrap();
-
+		let mut stream_buffer: [u8; 1024] = [0; 1024];
 		let mut resourse_path = String::new();
 
-		for (i, line) in String::from_utf8_lossy(&buffer[..]).lines().enumerate() {
+		stream.read(&mut stream_buffer).expect("sdfsdfsdf");
+
+		for (i, line) in String::from_utf8_lossy(&stream_buffer[..]).lines().enumerate() {
 			match i {
 				0 => {
 					for req in String::from(line).split(" ") {
@@ -137,6 +197,7 @@ impl Server {
 			}
 		};
 
+		// Send requested file 
     stream.write(&get_content(&self, resourse_path)).unwrap();
 		stream.flush().unwrap();
 
@@ -144,43 +205,30 @@ impl Server {
 
 	fn redirect(&mut self, path: String) -> String {
 
-		let file_req: bool = path.contains(".");
+		let is_file: bool = path.contains(".");
+		let is_page: bool = self.pages.is_page(&path);
+		
+		let mut new_path = self.redirect.path.clone() + &path;
 
-		let mut new_path: String = self.redirect.path.clone();
+		if is_page { 
 
-		self.redirect.dist = match path.as_str() {
-			"/" 
-				=> Dist::Absolute,
-			_ 
-				=> Dist::Relative,
-		};
+			self.redirect.path = path.clone();
+			
+			new_path = utils::web::path::apply_index(&path); 
 
-		println!("{:?}",self.redirect.dist);
-
-		match self.redirect.dist {
-			Dist::Absolute => {
-				new_path = path.clone()
-			},
-			Dist::Relative => {
-				new_path += path.as_str()
-			}
 		}
 
-		if !file_req {
-			new_path = self.apply_index(new_path) 
+		if is_file {
+			new_path = match self.redirect.path.as_str() {
+				"/" 
+					=> path,
+				_ 
+					=> format!("{}{}", &self.redirect.path, &path)
+			}
 		}
 
 		return new_path;
 
-	}
-
-	fn apply_index(&mut self, path: String) -> String {
-		match path.as_str() {
-			"/" 
-				=> String::from(path + "index.html"),
-			_ 
-				=> String::from(path + "/index.html")
-		}
 	}
 
 }

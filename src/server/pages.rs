@@ -10,12 +10,12 @@ impl PagesDict {
     PagesDict { list: HashSet::new() }
   }
 
-  pub fn is_page(&self, path: String) -> bool {
-    self.list.contains(&path)
+  pub fn is_page(&self, path: &String) -> bool {
+    self.list.contains(path)
   }
 
   pub fn set(&mut self, path: String) -> () {
-    self.list.insert(path.clone());
+    self.list.insert(path);
   }
 
 }
